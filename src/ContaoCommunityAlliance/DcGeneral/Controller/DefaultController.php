@@ -3,7 +3,7 @@
 /**
  * This file is part of contao-community-alliance/dc-general.
  *
- * (c) 2013-2016 Contao Community Alliance.
+ * (c) 2013-2017 Contao Community Alliance.
  *
  * For the full copyright and license information, please view the LICENSE
  * file that was distributed with this source code.
@@ -23,7 +23,7 @@
  * @author     David Molineus <david.molineus@netzmacht.de>
  * @author     Cliff Parnitzky <github@cliff-parnitzky.de>
  * @author     Sven Baumann <baumann.sv@gmail.com>
- * @copyright  2013-2016 Contao Community Alliance.
+ * @copyright  2013-2017 Contao Community Alliance.
  * @license    https://github.com/contao-community-alliance/dc-general/blob/master/LICENSE LGPL-3.0
  * @filesource
  */
@@ -37,17 +37,17 @@ use ContaoCommunityAlliance\DcGeneral\Clipboard\Item;
 use ContaoCommunityAlliance\DcGeneral\Clipboard\ItemInterface;
 use ContaoCommunityAlliance\DcGeneral\Contao\DataDefinition\Definition\Contao2BackendViewDefinitionInterface;
 use ContaoCommunityAlliance\DcGeneral\Contao\View\Contao2BackendView\ViewHelpers;
-use ContaoCommunityAlliance\DcGeneral\Data\ModelId;
-use ContaoCommunityAlliance\DcGeneral\Data\ModelIdInterface;
-use ContaoCommunityAlliance\DcGeneral\DataDefinition\Definition\BasicDefinitionInterface;
-use ContaoCommunityAlliance\DcGeneral\DataDefinition\Definition\Properties\PropertyInterface;
-use ContaoCommunityAlliance\DcGeneral\DataDefinition\Definition\View\GroupAndSortingInformationInterface;
 use ContaoCommunityAlliance\DcGeneral\Data\CollectionInterface;
 use ContaoCommunityAlliance\DcGeneral\Data\DataProviderInterface;
 use ContaoCommunityAlliance\DcGeneral\Data\DefaultCollection;
 use ContaoCommunityAlliance\DcGeneral\Data\LanguageInformationInterface;
+use ContaoCommunityAlliance\DcGeneral\Data\ModelId;
+use ContaoCommunityAlliance\DcGeneral\Data\ModelIdInterface;
 use ContaoCommunityAlliance\DcGeneral\Data\ModelInterface;
 use ContaoCommunityAlliance\DcGeneral\Data\MultiLanguageDataProviderInterface;
+use ContaoCommunityAlliance\DcGeneral\DataDefinition\Definition\BasicDefinitionInterface;
+use ContaoCommunityAlliance\DcGeneral\DataDefinition\Definition\Properties\PropertyInterface;
+use ContaoCommunityAlliance\DcGeneral\DataDefinition\Definition\View\GroupAndSortingInformationInterface;
 use ContaoCommunityAlliance\DcGeneral\DcGeneralEvents;
 use ContaoCommunityAlliance\DcGeneral\EnvironmentInterface;
 use ContaoCommunityAlliance\DcGeneral\Event\ActionEvent;
@@ -538,17 +538,37 @@ class DefaultController implements ControllerInterface
      * Fetch actions from source.
      *
      * @param ModelIdInterface      $source        The source id.
+     *
      * @param ModelIdInterface|null $parentModelId The parent id.
      *
      * @return array
+     *
+     * @throws \InvalidArgumentException When the model id is invalid.
      */
     private function getActionsFromSource(ModelIdInterface $source, ModelIdInterface $parentModelId = null)
     {
+        $environment        = $this->getEnvironment();
+        $clipboard          = $environment->getClipboard();
+        $basicDefinition    = $environment->getDataDefinition()->getBasicDefinition();
+        $modelProviderName  = $basicDefinition->getDataProvider();
+        $parentProviderName = $basicDefinition->getParentDataProvider();
+
+        $filter = new Filter();
+        $filter->andModelIsFromProvider($modelProviderName);
+        if ($parentProviderName) {
+            $filter->andParentIsFromProvider($parentProviderName);
+        } else {
+            $filter->andHasNoParent();
+        }
+        $filter->andModelIs($source);
+        $item = $clipboard->fetch($filter)[0];
+
+        $action  = $item ? $item->getAction() : ItemInterface::CUT;
         $model   = $this->modelCollector->getModel($source);
         $actions = array(
             array(
                 'model' => $model,
-                'item'  => new Item(ItemInterface::CUT, $parentModelId, ModelId::fromModel($model)),
+                'item'  => new Item($action, $parentModelId, ModelId::fromModel($model)),
             )
         );
 

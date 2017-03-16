@@ -22,13 +22,16 @@
 
 namespace ContaoCommunityAlliance\DcGeneral\Contao\View\Contao2BackendView\ActionHandler;
 
+use ContaoCommunityAlliance\Contao\Bindings\ContaoEvents;
+use ContaoCommunityAlliance\Contao\Bindings\Events\System\GetReferrerEvent;
 use ContaoCommunityAlliance\DcGeneral\Action;
-use ContaoCommunityAlliance\DcGeneral\Clipboard\Item;
+use ContaoCommunityAlliance\DcGeneral\Clipboard\Filter;
+use ContaoCommunityAlliance\DcGeneral\Contao\DataDefinition\Definition\Contao2BackendViewDefinitionInterface;
 use ContaoCommunityAlliance\DcGeneral\Contao\View\Contao2BackendView\Event\PrepareMultipleModelsActionEvent;
 use ContaoCommunityAlliance\DcGeneral\Contao\View\Contao2BackendView\ViewHelpers;
 use ContaoCommunityAlliance\DcGeneral\Data\ModelId;
-use ContaoCommunityAlliance\DcGeneral\Data\ModelIdInterface;
 use ContaoCommunityAlliance\DcGeneral\DataDefinition\Definition\View\BackCommand;
+use ContaoCommunityAlliance\DcGeneral\DataDefinition\Definition\View\Command;
 use ContaoCommunityAlliance\DcGeneral\Exception\DcGeneralRuntimeException;
 use ContaoCommunityAlliance\DcGeneral\View\ActionHandler\AbstractHandler;
 
@@ -43,46 +46,286 @@ class SelectHandler extends AbstractHandler
      * Handle the action.
      *
      * @return void
+     *
+     * @throws DcGeneralRuntimeException When the id is unparsable.
      */
     public function process()
     {
-        $action = $this->getEvent()->getAction();
-
-        if ($action->getName() !== 'select') {
+        if (!$this->getSelectAction()
+            || $this->getEvent()->getAction()->getName() !== 'select'
+        ) {
             return;
         }
 
-        $submitAction = $this->getSubmitAction();
+        $submitAction = $this->getSubmitAction(true);
 
-        if (!$submitAction) {
-            $this->removeGlobalCommands();
+        $this->removeGlobalCommands();
+
+        $this->handleSessionBySelectAction();
+
+        // FIXME: What can i do for remove this loop.
+        if ('models' === $this->getSelectAction()) {
+            $this->handleBySelectActionModels();
 
             return;
         }
 
-        $modelIds     = $this->getModelIds($action, $submitAction);
-        $actionMethod = sprintf('handle%sAllAction', ucfirst($submitAction));
+        $this->handleNonEditAction();
+        $this->clearClipboardBySubmitAction();
 
-        call_user_func(array($this, $actionMethod), $modelIds);
+        // FIXME: What can i do for remove this loop.
+        if ('properties' === $this->getSelectAction()) {
+            $this->handleBySelectActionProperties();
+
+            return;
+        }
+
+        $this->handleNonSelectByShowAllAction();
+
+        $this->handleGlobalCommands();
+
+        $this->callAction($submitAction . 'All', array('mode' => $submitAction));
     }
 
     /**
      * Get the submit action name.
      *
+     * @param boolean $regardSelectMode Regard the select mode parameter.
+     *
      * @return string
      */
-    protected function getSubmitAction()
+    private function getSubmitAction($regardSelectMode = false)
     {
         $inputProvider = $this->getEnvironment()->getInputProvider();
         $actions       = array('delete', 'cut', 'copy', 'override', 'edit');
 
         foreach ($actions as $action) {
-            if ($inputProvider->hasValue($action)) {
+            if ($inputProvider->hasValue($action)
+                || $inputProvider->hasValue($action . '_save')
+                || $inputProvider->hasValue($action . '_saveNback')
+            ) {
+                $inputProvider->setParameter('mode', $action);
+
                 return $action;
             }
         }
 
+
+        if ($regardSelectMode) {
+            return $inputProvider->getParameter('mode') ?: null;
+        }
+
         return null;
+    }
+
+    /**
+     * Get the select action.
+     *
+     * @return string
+     */
+    private function getSelectAction()
+    {
+        return $this->getEnvironment()->getInputProvider()->getParameter('select');
+    }
+
+    /**
+     * Handle by select action models.
+     *
+     * @return void
+     */
+    private function handleBySelectActionModels()
+    {
+        if ('models' !== $this->getSelectAction()) {
+            return;
+        }
+
+        $this->clearClipboard();
+
+        $this->handleGlobalCommands();
+
+        $arguments           = $this->getEvent()->getAction()->getArguments();
+        $arguments['mode']   = $this->getSubmitAction(true);
+        $arguments['select'] = $this->getSelectAction();
+
+        $this->callAction('showAll', $arguments);
+    }
+
+    /**
+     * Handle by select action properties.
+     *
+     * @return void
+     */
+    private function handleBySelectActionProperties()
+    {
+        if ('properties' !== $this->getSelectAction()) {
+            return;
+        }
+
+        $this->handleGlobalCommands();
+
+        $arguments           = $this->getEvent()->getAction()->getArguments();
+        $arguments['mode']   = $this->getSubmitAction(true);
+        $arguments['select'] = $this->getSelectAction();
+
+        $this->callAction('showAll', $arguments);
+    }
+
+    /**
+     * Handle the session by select action.
+     *
+     * @return void
+     */
+    private function handleSessionBySelectAction()
+    {
+        $environment   = $this->getEnvironment();
+        $inputProvider = $environment->getInputProvider();
+
+        switch ($this->getSelectAction()) {
+            case 'properties':
+                if ($inputProvider->hasValue('models')) {
+                    $models = $this->getModelIds($this->getEvent()->getAction(), $this->getSubmitAction());
+
+                    $this->handleSessionOverrideEditAll($models, 'models');
+                }
+
+                break;
+
+            case 'edit':
+                if ($inputProvider->hasValue('properties')) {
+                    $this->handleSessionOverrideEditAll($inputProvider->getValue('properties'), 'properties');
+                }
+
+                break;
+
+            default:
+        }
+    }
+
+    /**
+     * Handle session data for override/edit all.
+     *
+     * @param array  $collection The collection.
+     *
+     * @param string $index      The session index for the collection.
+     *
+     * @return array The collection.
+     */
+    private function handleSessionOverrideEditAll(array $collection, $index)
+    {
+        $environment    = $this->getEnvironment();
+        $dataDefinition = $environment->getDataDefinition();
+        $sessionStorage = $environment->getSessionStorage();
+        $submitAction   = $this->getSubmitAction(true);
+
+        $session = array();
+        if ($sessionStorage->has($dataDefinition->getName() . '.' . $submitAction)) {
+            $session = $sessionStorage->get($dataDefinition->getName() . '.' . $submitAction);
+        }
+
+        // If collection not empty set to the session and return it.
+        if (!empty($collection)) {
+            $sessionCollection = array_map(
+                function ($item) use ($index) {
+                    if (!in_array($index, array('models', 'properties'))) {
+                        return $item;
+                    }
+
+                    if (!$item instanceof ModelId) {
+                        $item = ModelId::fromSerialized($item);
+                    }
+
+                    return $item->getSerialized();
+                },
+                $collection
+            );
+
+            $session[$index] = $sessionCollection;
+
+            $sessionStorage->set($dataDefinition->getName() . '.' . $submitAction, $session);
+
+            return $collection;
+        }
+
+        // If the collection not in the session return the collection.
+        if (empty($session[$index])) {
+            return $collection;
+        }
+
+        // Get the verify collection from the session and return it.
+        $collection = array_map(
+            function ($item) use ($index) {
+                if (!in_array($index, array('models', 'properties'))) {
+                    return $item;
+                }
+
+                return ModelId::fromSerialized($item);
+            },
+            $session[$index]
+        );
+
+        return $collection;
+    }
+
+    /**
+     * This handle non edit action.
+     *
+     * @return void
+     */
+    private function handleNonEditAction()
+    {
+        $submitAction = $this->getSubmitAction();
+        if (!in_array($submitAction, array('delete', 'copy', 'cut'))) {
+            return;
+        }
+
+        switch ($submitAction) {
+            case 'copy':
+            case 'cut':
+                $parameter = 'source';
+                break;
+
+            default:
+                $parameter = 'id';
+        }
+
+        $modelIds = $this->getModelIds($this->getEvent()->getAction(), $submitAction);
+
+        foreach ($modelIds as $modelId) {
+            $this->getEnvironment()->getInputProvider()->setParameter($parameter, $modelId->getSerialized());
+            $this->callAction($submitAction);
+        }
+
+        ViewHelpers::redirectHome($this->getEnvironment());
+    }
+
+    /**
+     * If non select models or properties by show all action redirect to home.
+     *
+     * @return void
+     *
+     * @throws DcGeneralRuntimeException When the id is unparsable.
+     */
+    private function handleNonSelectByShowAllAction()
+    {
+        $submitAction = $this->getSubmitAction(true);
+        if (in_array($submitAction, array('cut', 'delete', 'copy', 'override', 'edit'))) {
+            return;
+        }
+
+        $environment   = $this->getEnvironment();
+        $inputProvider = $environment->getInputProvider();
+        $translator    = $environment->getTranslator();
+
+
+        $modelIds = $this->getModelIds($this->getEvent()->getAction(), $submitAction);
+
+        if ((empty($modelIds)
+             && $inputProvider->getValue($submitAction) !== $translator->translate('MSC.continue'))
+            || ($inputProvider->getValue($submitAction) === $translator->translate('MSC.continue')
+                && !$inputProvider->hasValue('properties'))
+        ) {
+            ViewHelpers::redirectHome($this->getEnvironment());
+        }
     }
 
     /**
@@ -91,7 +334,7 @@ class SelectHandler extends AbstractHandler
      *
      * @return void
      */
-    protected function removeGlobalCommands()
+    private function removeGlobalCommands()
     {
         $event          = $this->getEvent();
         $environment    = $event->getEnvironment();
@@ -101,23 +344,97 @@ class SelectHandler extends AbstractHandler
 
         foreach ($globalCommands->getCommands() as $globalCommand) {
             if (!($globalCommand instanceof BackCommand)) {
-                $globalCommands->removeCommand($globalCommand);
+                $globalCommand->setDisabled();
             }
         }
+    }
+
+    /**
+     * Handle the global commands.
+     *
+     * @return void
+     */
+    private function handleGlobalCommands()
+    {
+        $environment    = $this->getEnvironment();
+        $dataDefinition = $environment->getDataDefinition();
+        $backendView    = $dataDefinition->getDefinition(Contao2BackendViewDefinitionInterface::NAME);
+        $globalCommand  = $backendView->getGlobalCommands();
+
+        $backButton = null;
+        if ($globalCommand->hasCommandNamed('back_button')) {
+            $backButton = $globalCommand->getCommandNamed('back_button');
+        }
+
+        if (!$backButton) {
+            return;
+        }
+
+        $parametersBackButton = $backButton->getParameters();
+
+        if (in_array($this->getSelectAction(), array('properties', 'edit'))) {
+            $parametersBackButton->offsetSet('act', 'select');
+            $parametersBackButton->offsetSet('select', ($this->getSelectAction() === 'edit') ? 'properties' : 'models');
+            $parametersBackButton->offsetSet('mode', $this->getSubmitAction(true));
+        }
+
+        $closeCommand = new Command();
+        $globalCommand->addCommand($closeCommand);
+
+        $closeExtra = array(
+            'href'       => $this->getReferrerUrl(),
+            'class'      => 'header_logout',
+            'icon'       => 'delete.gif',
+            'accessKey'  => 'x',
+            'attributes' => 'onclick="Backend.getScrollOffset();"'
+        );
+
+        $closeCommand
+            ->setName('close_all_button')
+            ->setLabel('MSC.closeAll.0')
+            ->setDescription('MSC.closeAll.1')
+            ->setParameters(new \ArrayObject())
+            ->setExtra(new \ArrayObject($closeExtra))
+            ->setDisabled(false);
+    }
+
+    /**
+     * Determine the correct referrer URL.
+     *
+     * @return mixed
+     */
+    private function getReferrerUrl()
+    {
+        $environment          = $this->getEnvironment();
+        $parentDataDefinition = $environment->getParentDataDefinition();
+
+        $event = new GetReferrerEvent(
+            true,
+            (null !== $parentDataDefinition)
+                ? $parentDataDefinition->getName()
+                : $environment->getDataDefinition()->getName()
+        );
+
+        $environment->getEventDispatcher()->dispatch(ContaoEvents::SYSTEM_GET_REFERRER, $event);
+
+        return $event->getReferrerUrl();
     }
 
     /**
      * Get The model ids from the environment.
      *
      * @param Action $action       The dcg action.
+     *
      * @param string $submitAction The submit action name.
      *
      * @return ModelId[]
+     *
+     * @throws DcGeneralRuntimeException When the id is unparsable.
      */
-    protected function getModelIds(Action $action, $submitAction)
+    private function getModelIds(Action $action, $submitAction)
     {
         $environment = $this->getEnvironment();
-        $modelIds    = (array) $environment->getInputProvider()->getValue('IDS');
+        $modelIds    = (array) $environment->getInputProvider()->getValue('models');
 
         if (!empty($modelIds)) {
             $modelIds = array_map(
@@ -137,126 +454,47 @@ class SelectHandler extends AbstractHandler
     }
 
     /**
-     * Handle the delete all action.
-     *
-     * @param ModelId[] $modelIds The list of model ids.
+     * Clear the clipboard by override/edit submit actions.
      *
      * @return void
      */
-    protected function handleDeleteAllAction($modelIds)
+    private function clearClipboardBySubmitAction()
     {
-        $handler = new DeleteHandler();
-        $handler->setEnvironment($this->getEnvironment());
-
-        foreach ($modelIds as $modelId) {
-            $handler->delete($modelId);
+        if (in_array($this->getSubmitAction(), array('edit', 'override'))) {
+            return;
         }
 
-        ViewHelpers::redirectHome($this->getEnvironment());
+        $this->clearClipboard();
     }
 
     /**
-     * Handle the delete all action.
-     *
-     * @param ModelId[] $modelIds The list of model ids.
+     * Clear the clipboard if has items.
      *
      * @return void
      */
-    protected function handleCutAllAction($modelIds)
+    private function clearClipboard()
     {
-        $environment = $this->getEnvironment();
-        $clipboard   = $environment->getClipboard();
-        $parentId    = $this->getParentId();
+        $environment        = $this->getEnvironment();
+        $clipboard          = $environment->getClipboard();
+        $basicDefinition    = $environment->getDataDefinition()->getBasicDefinition();
+        $modelProviderName  = $basicDefinition->getDataProvider();
+        $parentProviderName = $basicDefinition->getParentDataProvider();
 
-        foreach ($modelIds as $modelId) {
-            $clipboard->push(new Item(Item::CUT, $parentId, $modelId));
-        }
-
-        $clipboard->saveTo($environment);
-
-        ViewHelpers::redirectHome($this->getEnvironment());
-    }
-
-    /**
-     * Handle the delete all action.
-     *
-     * @param ModelIdInterface[] $modelIds The list of model ids.
-     *
-     * @return void
-     */
-    protected function handleCopyAllAction($modelIds)
-    {
-        if (ViewHelpers::getManualSortingProperty($this->getEnvironment())) {
-            $clipboard = $this->getEnvironment()->getClipboard();
-            $parentId  = $this->getParentId();
-
-            foreach ($modelIds as $modelId) {
-                $item = new Item(Item::COPY, $parentId, $modelId);
-
-                $clipboard->push($item);
-            }
-
-            $clipboard->saveTo($this->getEnvironment());
+        $filter = new Filter();
+        $filter->andModelIsFromProvider($modelProviderName);
+        if ($parentProviderName) {
+            $filter->andParentIsFromProvider($parentProviderName);
         } else {
-            $handler = new CopyHandler();
-            $handler->setEnvironment($this->getEnvironment());
-
-            foreach ($modelIds as $modelId) {
-                $handler->copy($modelId);
-            }
+            $filter->andHasNoParent();
         }
 
-        ViewHelpers::redirectHome($this->getEnvironment());
-    }
-
-    /**
-     * Handle the delete all action.
-     *
-     * @param ModelId[] $modelIds The list of model ids.
-     *
-     * @return void
-     *
-     * @throws DcGeneralRuntimeException Not yet implemented.
-     *
-     * @SuppressWarnings(PHPMD.UnusedFormalParameter)
-     */
-    protected function handleOverrideAllAction($modelIds)
-    {
-        throw new DcGeneralRuntimeException('Action overrideAll is not implemented yet.');
-    }
-
-    /**
-     * Handle the delete all action.
-     *
-     * @param ModelId[] $modelIds The list of model ids.
-     *
-     * @return void
-     *
-     * @throws DcGeneralRuntimeException Not yet implemented.
-     *
-     * @SuppressWarnings(PHPMD.UnusedFormalParameter)
-     */
-    protected function handleEditAllAction($modelIds)
-    {
-        throw new DcGeneralRuntimeException('Action editAll is not implemented yet.');
-    }
-
-    /**
-     * Get the parent model id.
-     *
-     * Returns null if no parent id is given.
-     *
-     * @return ModelIdInterface|null
-     */
-    protected function getParentId()
-    {
-        $parentIdRaw = $this->getEnvironment()->getInputProvider()->getParameter('pid');
-
-        if ($parentIdRaw) {
-            $parentId = ModelId::fromSerialized($parentIdRaw);
-            return $parentId;
+        $items = $clipboard->fetch($filter);
+        if (count($items) < 1) {
+            return;
         }
 
-        return null;
+        foreach ($items as $item) {
+            $clipboard->remove($item);
+        }
     }
 }

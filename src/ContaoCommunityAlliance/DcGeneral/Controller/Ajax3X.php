@@ -3,7 +3,7 @@
 /**
  * This file is part of contao-community-alliance/dc-general.
  *
- * (c) 2013-2016 Contao Community Alliance.
+ * (c) 2013-2017 Contao Community Alliance.
  *
  * For the full copyright and license information, please view the LICENSE
  * file that was distributed with this source code.
@@ -17,7 +17,7 @@
  * @author     Andreas Nölke <zero@brothers-project.de>
  * @author     David Molineus <david.molineus@netzmacht.de>
  * @author     Sven Baumann <baumann.sv@gmail.com>
- * @copyright  2013-2016 Contao Community Alliance.
+ * @copyright  2013-2017 Contao Community Alliance.
  * @license    https://github.com/contao-community-alliance/dc-general/blob/master/LICENSE LGPL-3.0
  * @filesource
  */
@@ -231,12 +231,11 @@ class Ajax3X extends Ajax
         $environment  = $this->getEnvironment();
         $input        = $environment->getInputProvider();
         $serializedId = ($input->hasParameter('id') && $input->getParameter('id')) ? $input->getParameter('id') : null;
-        $fieldName    = $input->hasValue('name') ? $input->getValue('name') : null;
+        $fieldName    = $this->getFieldName();
         $value        = $input->hasValue('value') ? $input->getValue('value', true) : null;
 
-        $widget = $this->getWidget($fieldName, $serializedId, $value);
+        $this->generateWidget($this->getWidget($fieldName, $serializedId, $value));
 
-        echo $widget->generate();
         $this->exitScript();
     }
 
@@ -273,5 +272,84 @@ class Ajax3X extends Ajax
         $session->set('LEGENDS', $states);
 
         $this->exitScript();
+    }
+
+    /**
+     * Get the field name.
+     *
+     * @return null|string
+     */
+    private function getFieldName()
+    {
+        $environment   = $this->getEnvironment();
+        $inputProvider = $environment->getInputProvider();
+
+        $fieldName = $inputProvider->hasValue('name') ? $inputProvider->getValue('name') : null;
+        if (null === $fieldName) {
+            return $fieldName;
+        }
+
+        if (('select' !== $inputProvider->getParameter('act'))
+            && ('edit' !== $inputProvider->getParameter('mode'))
+        ) {
+            return $fieldName;
+        }
+
+        $dataDefinition = $environment->getDataDefinition();
+        $sessionStorage = $environment->getSessionStorage();
+
+        $selectAction = $inputProvider->getParameter('select');
+
+        $session = $sessionStorage->get($dataDefinition->getName() . '.' . $selectAction);
+
+        $originalPropertyName = null;
+        foreach ($session['models'] as $modelId) {
+            if (null !== $originalPropertyName) {
+                break;
+            }
+
+            $propertyNamePrefix = str_replace('::', '____', $modelId) . '_';
+            if ($propertyNamePrefix !== substr($fieldName, 0, strlen($propertyNamePrefix))) {
+                continue;
+            }
+
+            $originalPropertyName = substr($fieldName, strlen($propertyNamePrefix));
+        }
+
+        if (!$originalPropertyName) {
+            return $fieldName;
+        }
+
+        return $originalPropertyName;
+    }
+
+    /**
+     * Generate the widget.
+     *
+     * @param Widget $widget The widget.
+     *
+     * @return void
+     */
+    private function generateWidget(Widget $widget)
+    {
+        $environment   = $this->getEnvironment();
+        $inputProvider = $environment->getInputProvider();
+
+        if (('select' !== $inputProvider->getParameter('act'))
+            && ('edit' !== $inputProvider->getParameter('mode'))
+        ) {
+            echo $widget->generate();
+
+            return;
+        }
+
+        $dataProvider = $environment->getDataProvider();
+
+        $model = $dataProvider->getEmptyModel();
+        $model->setProperty($widget->name, $widget->value);
+
+        $widgetBuilder = new ContaoWidgetManager($environment, $model);
+
+        echo $widgetBuilder->getWidget($inputProvider->getValue('name'))->generate();
     }
 }

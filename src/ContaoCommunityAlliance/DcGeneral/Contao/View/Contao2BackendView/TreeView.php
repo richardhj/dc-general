@@ -3,7 +3,7 @@
 /**
  * This file is part of contao-community-alliance/dc-general.
  *
- * (c) 2013-2016 Contao Community Alliance.
+ * (c) 2013-2017 Contao Community Alliance.
  *
  * For the full copyright and license information, please view the LICENSE
  * file that was distributed with this source code.
@@ -15,7 +15,8 @@
  * @author     Stefan Heimes <stefan_heimes@hotmail.com>
  * @author     Tristan Lins <tristan.lins@bit3.de>
  * @author     David Molineus <david.molineus@netzmacht.de>
- * @copyright  2013-2016 Contao Community Alliance.
+ * @author     Sven Baumann <baumann.sv@gmail.com>
+ * @copyright  2013-2017 Contao Community Alliance.
  * @license    https://github.com/contao-community-alliance/dc-general/blob/master/LICENSE LGPL-3.0
  * @filesource
  */
@@ -298,7 +299,8 @@ class TreeView extends BaseView
                 $objTemplate
             )
             ->addToTemplate('toggleTitle', $toggleTitle, $objTemplate)
-            ->addToTemplate('toggleScript', $toggleScript, $objTemplate);
+            ->addToTemplate('toggleScript', $toggleScript, $objTemplate)
+            ->addToTemplate('selectContainer', $this->getSelectContainer(), $objTemplate);
 
         return $objTemplate->parse();
     }
@@ -487,6 +489,8 @@ class TreeView extends BaseView
         $objTemplate->selectButtons    = $this->getSelectButtons();
         $objTemplate->intMode          = 6;
 
+        $this->formActionForSelect($objTemplate);
+
         // Add breadcrumb, if we have one.
         $strBreadcrumb = $this->breadcrumb();
         if ($strBreadcrumb != null) {
@@ -497,11 +501,34 @@ class TreeView extends BaseView
     }
 
     /**
+     * Add the form action url for input parameter action is select.
+     *
+     * @param ContaoBackendViewTemplate $objTemplate The template.
+     *
+     * @return void
+     */
+    protected function formActionForSelect(ContaoBackendViewTemplate $objTemplate)
+    {
+        if ($this->getEnvironment()->getInputProvider()->getParameter('act') !== 'select'
+            || !$objTemplate->select
+        ) {
+            return;
+        }
+
+        $actionUrlEvent = new AddToUrlEvent('select=properties');
+        $this->getEnvironment()->getEventDispatcher()->dispatch(ContaoEvents::BACKEND_ADD_TO_URL, $actionUrlEvent);
+
+        $objTemplate->action = $actionUrlEvent->getUrl();
+    }
+
+    /**
      * {@inheritDoc}
      *
      * @deprecated Use ContaoCommunityAlliance\DcGeneral\EventListener\ModelRelationship\TreeEnforcingListener
      *
-     * @see \ContaoCommunityAlliance\DcGeneral\EventListener\ModelRelationship\TreeEnforcingListener
+     * @see        \ContaoCommunityAlliance\DcGeneral\EventListener\ModelRelationship\TreeEnforcingListener
+     *
+     * @return void
      */
     public function enforceModelRelationship($model)
     {
@@ -603,5 +630,35 @@ class TreeView extends BaseView
         $strHtml = $this->generateTreeView($collection, $treeClass);
 
         return $strHtml;
+    }
+
+    /**
+     * Get the the container of selections.
+     *
+     * @return array
+     */
+    private function getSelectContainer()
+    {
+        $environment    = $this->getEnvironment();
+        $inputProvider  = $environment->getInputProvider();
+        $sessionStorage = $environment->getSessionStorage();
+        $dataDefinition = $environment->getDataDefinition();
+
+        $sessionName = $dataDefinition->getName() . '.' . $inputProvider->getParameter('mode');
+        if (!$sessionStorage->has($sessionName)) {
+            return array();
+        }
+
+        $selectAction = $inputProvider->getParameter('select');
+        if (!$selectAction) {
+            return array();
+        }
+
+        $session = $sessionStorage->get($sessionName);
+        if (!array_key_exists($selectAction, $session)) {
+            return array();
+        }
+
+        return $session[$selectAction];
     }
 }

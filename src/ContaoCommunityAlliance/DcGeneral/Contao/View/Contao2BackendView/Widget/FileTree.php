@@ -15,6 +15,7 @@
  * @author     Christian Schiffler <c.schiffler@cyberspectrum.de>
  * @author     Stefan Heimes <stefan_heimes@hotmail.com>
  * @author     Ingolf Steinhardt <info@e-spin.de>
+ * @author     Sven Baumann <baumann.sv@gmail.com>
  * @copyright  2013-2017 Contao Community Alliance.
  * @license    https://github.com/contao-community-alliance/dc-general/blob/master/LICENSE LGPL-3.0
  * @filesource
@@ -415,11 +416,17 @@ class FileTree extends AbstractWidget
     {
         $inputProvider = $this->getEnvironment()->getInputProvider();
 
+        $actionParameter = 'show';
+        if ('select' === $inputProvider->getParameter('act')) {
+            $actionParameter = 'select&amp;mode=' . $inputProvider->getParameter('mode');
+        }
+
         return sprintf(
-            'contao/file.php?do=%s&amp;table=%s&amp;field=%s&amp;act=show&amp;id=%s&amp;value=%s&amp;rt=%s',
+            'contao/file.php?do=%s&amp;table=%s&amp;field=%s&amp;act=%s&amp;id=%s&amp;value=%s&amp;rt=%s',
             $inputProvider->getParameter('do'),
             $this->getModel()->getProviderName(),
             $this->strField,
+            $actionParameter,
             $this->getModel()->getId(),
             implode(',', $values),
             \RequestToken::get()

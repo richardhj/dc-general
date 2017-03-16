@@ -3,7 +3,7 @@
 /**
  * This file is part of contao-community-alliance/dc-general.
  *
- * (c) 2013-2016 Contao Community Alliance.
+ * (c) 2013-2017 Contao Community Alliance.
  *
  * For the full copyright and license information, please view the LICENSE
  * file that was distributed with this source code.
@@ -21,7 +21,7 @@
  * @author     Simon Kusterer <simon@soped.com>
  * @author     Christopher Boelter <christopher@boelter.eu>
  * @author     Sven Baumann <baumann.sv@gmail.com>
- * @copyright  2013-2016 Contao Community Alliance.
+ * @copyright  2013-2017 Contao Community Alliance.
  * @license    https://github.com/contao-community-alliance/dc-general/blob/master/LICENSE LGPL-3.0
  * @filesource
  */
@@ -486,11 +486,14 @@ class DefaultDataProvider implements DataProviderInterface
      * @param ModelInterface $model The model to convert into an property array.
      *
      * @return array
+     *
+     * @SuppressWarnings(PHPMD.Superglobals)
      */
     protected function convertModelToDataPropertyArray(ModelInterface $model)
     {
-        $data = array();
+        $editInformation = $GLOBALS['container']['dc-general.edit-information'];
 
+        $data = array();
         foreach ($model as $key => $value) {
             if ($key == $this->idProperty) {
                 continue;
@@ -504,7 +507,7 @@ class DefaultDataProvider implements DataProviderInterface
         }
 
         if ($this->timeStampProperty) {
-            $data[$this->getTimeStampProperty()] = time();
+            $data[$this->getTimeStampProperty()] = $editInformation->uniformTime();
         }
 
         return $data;

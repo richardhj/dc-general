@@ -12,6 +12,7 @@
  *
  * @package    contao-community-alliance/dc-general
  * @author     Christian Schiffler <c.schiffler@cyberspectrum.de>
+ * @author     Sven Baumann <baumann.sv@gmail.com>
  * @copyright  2013-2017 Contao Community Alliance.
  * @license    https://github.com/contao-community-alliance/dc-general/blob/master/LICENSE LGPL-3.0
  * @filesource
@@ -169,12 +170,15 @@ class ParentedListViewShowAllHandler extends AbstractListShowAllHandler
             $add = $event->getAdditional();
         }
 
-        return array_map(function ($value) {
-            if (is_array($value)) {
-                return $value[0];
-            }
-            return $value;
-        }, $add);
+        return array_map(
+            function ($value) {
+                if (is_array($value)) {
+                    return $value[0];
+                }
+                return $value;
+            },
+            $add
+        );
     }
 
     /**
@@ -200,6 +204,7 @@ class ParentedListViewShowAllHandler extends AbstractListShowAllHandler
      * Render a property of the parent model.
      *
      * @param PropertyInterface $property The property.
+     *
      * @param mixed             $value    The value to format.
      *
      * @return string
@@ -249,6 +254,7 @@ class ParentedListViewShowAllHandler extends AbstractListShowAllHandler
 
         return $reference[$value];
     }
+
     /**
      * Retrieve a list of html buttons to use in the top panel (submit area).
      *
@@ -343,7 +349,9 @@ class ParentedListViewShowAllHandler extends AbstractListShowAllHandler
         return sprintf(
             '<a href="%s" title="%s" onclick="Backend.getScrollOffset()">%s</a>',
             $urlAfter->getUrl(),
-            specialchars(sprintf($this->translate('editheader.1', $parentDefinition->getName()), $parentModel->getId())),
+            specialchars(
+                sprintf($this->translate('editheader.1', $parentDefinition->getName()), $parentModel->getId())
+            ),
             $imageEvent->getHtml()
         );
     }
