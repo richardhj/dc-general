@@ -3,7 +3,7 @@
 /**
  * This file is part of contao-community-alliance/dc-general.
  *
- * (c) 2013-2016 Contao Community Alliance.
+ * (c) 2013-2017 Contao Community Alliance.
  *
  * For the full copyright and license information, please view the LICENSE
  * file that was distributed with this source code.
@@ -20,7 +20,7 @@
  * @author     Simon Kusterer <simon@soped.com>
  * @author     David Molineus <david.molineus@netzmacht.de>
  * @author     Sven Baumann <baumann.sv@gmail.com>
- * @copyright  2013-2016 Contao Community Alliance.
+ * @copyright  2013-2017 Contao Community Alliance.
  * @license    https://github.com/contao-community-alliance/dc-general/blob/master/LICENSE LGPL-3.0
  * @filesource
  */
@@ -30,6 +30,7 @@ namespace ContaoCommunityAlliance\DcGeneral;
 use Contao\DataContainer;
 use ContaoCommunityAlliance\DcGeneral\Contao\Callback\Callbacks;
 use ContaoCommunityAlliance\DcGeneral\Controller\ControllerInterface;
+use ContaoCommunityAlliance\DcGeneral\Data\ModelId;
 use ContaoCommunityAlliance\DcGeneral\Exception\DcGeneralRuntimeException;
 use ContaoCommunityAlliance\DcGeneral\Factory\DcGeneralFactory;
 use ContaoCommunityAlliance\DcGeneral\Factory\Event\PopulateEnvironmentEvent;
@@ -202,9 +203,42 @@ class DC_General extends DataContainer implements DataContainerInterface
      */
     public function __get($name)
     {
+        $environment          = $this->getEnvironment();
+        $inputProvider        = $environment->getInputProvider();
+        $dataDefinition       = $environment->getDataDefinition();
+        $modelRelation        = $dataDefinition->getModelRelationshipDefinition();
+        $parentDataDefinition = $environment->getParentDataDefinition();
+
         switch ($name) {
+            case 'id':
+                // Find the parent id for the Contao breadcrumb.
+                if (null === $parentDataDefinition) {
+                    break;
+                }
+
+                $childCondition = $modelRelation->getChildCondition(
+                    $parentDataDefinition->getName(),
+                    $dataDefinition->getName()
+                );
+
+                $parentPropertyName = null;
+                foreach ($childCondition->getSetters() as $setter) {
+                    if ($name !== $setter['from_field']) {
+                        continue;
+                    }
+
+                    $parentPropertyName = $setter['to_field'];
+                    break;
+                }
+
+                if (null === $parentPropertyName) {
+                    break;
+                }
+
+                return ModelId::fromSerialized($inputProvider->getParameter($parentPropertyName))->getId();
+
             case 'table':
-                return $this->getEnvironment()->getDataDefinition()->getName();
+                return $dataDefinition->getName();
             default:
         }
 
