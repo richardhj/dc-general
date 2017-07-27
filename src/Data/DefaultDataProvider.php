@@ -31,6 +31,7 @@ namespace ContaoCommunityAlliance\DcGeneral\Data;
 use Contao\BackendUser;
 use Contao\Database;
 use Contao\Database\Result;
+use Contao\StringUtil;
 use ContaoCommunityAlliance\DcGeneral\Exception\DcGeneralRuntimeException;
 
 /**
@@ -306,7 +307,7 @@ class DefaultDataProvider implements DataProviderInterface
                 $objModel->setIdRaw($value);
             }
 
-            $objModel->setPropertyRaw($key, deserialize($value));
+            $objModel->setPropertyRaw($key, StringUtil::deserialize($value));
         }
 
         return $objModel;
